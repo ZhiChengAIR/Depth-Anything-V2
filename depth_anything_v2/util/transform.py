@@ -1,5 +1,5 @@
-import numpy as np
-import cv2
+import torch
+import torch.nn.functional as F
 
 
 class Resize(object):
@@ -14,7 +14,7 @@ class Resize(object):
         keep_aspect_ratio=False,
         ensure_multiple_of=1,
         resize_method="lower_bound",
-        image_interpolation_method=cv2.INTER_AREA,
+        image_interpolation_method="nearest",
     ):
         """Init.
 
@@ -31,12 +31,15 @@ class Resize(object):
                 resize behaviour depends on the parameter 'resize_method'.
                 Defaults to False.
             ensure_multiple_of (int, optional):
-                Output width and height is constrained to be multiple of this parameter.
+                Output width and height is constrained to be multiple of this
+                parameter.
                 Defaults to 1.
             resize_method (str, optional):
                 "lower_bound": Output will be at least as large as the given size.
-                "upper_bound": Output will be at max as large as the given size. (Output size might be smaller than given size.)
-                "minimal": Scale as least as possible.  (Output size might be smaller than given size.)
+                "upper_bound": Output will be at max as large as the given size.
+                (Output size might be smaller than given size.)
+                "minimal": Scale as least as possible.
+                (Output size might be smaller than given size.)
                 Defaults to "lower_bound".
         """
         self.__width = width
@@ -49,13 +52,13 @@ class Resize(object):
         self.__image_interpolation_method = image_interpolation_method
 
     def constrain_to_multiple_of(self, x, min_val=0, max_val=None):
-        y = (np.round(x / self.__multiple_of) * self.__multiple_of).astype(int)
+        y = (torch.round(x / self.__multiple_of) * self.__multiple_of).type_as(torch.int64)
 
         if max_val is not None and y > max_val:
-            y = (np.floor(x / self.__multiple_of) * self.__multiple_of).astype(int)
+            y = (torch.floor(x / self.__multiple_of) * self.__multiple_of).type_as(torch.int64)
 
         if y < min_val:
-            y = (np.ceil(x / self.__multiple_of) * self.__multiple_of).astype(int)
+            y = (torch.ceil(x / self.__multiple_of) * self.__multiple_of).type_as(torch.int64)
 
         return y
 
@@ -107,18 +110,26 @@ class Resize(object):
         return (new_width, new_height)
 
     def __call__(self, sample):
-        width, height = self.get_size(sample["image"].shape[1], sample["image"].shape[0])
-        
+        width, height = self.get_size(
+            sample["image"].shape[1], sample["image"].shape[0])
+
         # resize sample
-        sample["image"] = cv2.resize(sample["image"], (width, height), interpolation=self.__image_interpolation_method)
+        sample["image"] = F.interpolate(sample["image"],
+                                        size=(width, height),
+                                        mode=self.__image_interpolation_method,
+                                        align_corners=False)
 
         if self.__resize_target:
             if "depth" in sample:
-                sample["depth"] = cv2.resize(sample["depth"], (width, height), interpolation=cv2.INTER_NEAREST)
-                
+                sample["depth"] = F.interpolate(sample["depth"],
+                                                size=(width, height),
+                                                mode="nearest")
+
             if "mask" in sample:
-                sample["mask"] = cv2.resize(sample["mask"].astype(np.float32), (width, height), interpolation=cv2.INTER_NEAREST)
-        
+                sample["mask"] = F.interpolate(sample["mask"].to(torch.float32),
+                                               size=(width, height),
+                                               mode="nearest")
+
         return sample
 
 
@@ -144,15 +155,13 @@ class PrepareForNet(object):
         pass
 
     def __call__(self, sample):
-        image = np.transpose(sample["image"], (2, 0, 1))
-        sample["image"] = np.ascontiguousarray(image).astype(np.float32)
+        image = sample["image"].permute(2, 0, 1)
+        sample["image"] = image.contiguous().to(torch.float32)
 
         if "depth" in sample:
-            depth = sample["depth"].astype(np.float32)
-            sample["depth"] = np.ascontiguousarray(depth)
-        
+            sample["depth"] = sample["depth"].contiguous().to(torch.float32)
+
         if "mask" in sample:
-            sample["mask"] = sample["mask"].astype(np.float32)
-            sample["mask"] = np.ascontiguousarray(sample["mask"])
-        
+            sample["mask"] = sample["mask"].contiguous().to(torch.float32)
+
         return sample
