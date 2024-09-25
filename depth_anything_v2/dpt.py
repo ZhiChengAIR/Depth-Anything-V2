@@ -1,4 +1,3 @@
-import cv2
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -186,8 +185,8 @@ class DepthAnythingV2(nn.Module):
         return depth.squeeze(1)
 
     @torch.no_grad()
-    def infer_image(self, raw_image, input_size=518):
-        image, (h, w) = self.image2tensor(raw_image, input_size)
+    def infer_image(self, img_tensor, input_size=518):
+        image, (h, w) = self.transform_tensor(img_tensor, input_size)
 
         depth = self.forward(image)
 
@@ -196,7 +195,7 @@ class DepthAnythingV2(nn.Module):
 
         return depth.cpu().numpy()
 
-    def image2tensor(self, raw_image, input_size=518):
+    def transform_tensor(self, img_tensor, input_size=518):
         transform = Compose([
             Resize(
                 width=input_size,
@@ -205,17 +204,14 @@ class DepthAnythingV2(nn.Module):
                 keep_aspect_ratio=True,
                 ensure_multiple_of=14,
                 resize_method='lower_bound',
-                image_interpolation_method="bicubic",
+                image_interpolation_method='bicubic',
             ),
             PrepareForNet(),
         ])
 
-        h, w = raw_image.shape[:2]
+        h, w = img_tensor.shape[:2]
 
-        image = cv2.cvtColor(raw_image, cv2.COLOR_BGR2RGB) / 255.0
-
-        image = transform({'image': image})['image']
-        image = torch.from_numpy(image).unsqueeze(0)
+        image = transform({'image': img_tensor})['image']
 
         DEVICE = 'cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu'
         image = image.to(DEVICE)
